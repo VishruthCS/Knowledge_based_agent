@@ -1,21 +1,15 @@
-streamlit
-# ChromaDB 0.3.29 is required because your code uses .persist()
+streamlit>=1.35.0
 chromadb==0.3.29
-
-# LangChain and GenAI (Unpinned to allow pip to resolve versions automatically)
-langchain
-langchain-community
-langchain-google-genai
-google-generativeai
-
-# Document Processing
+langchain>=0.2.0
+langchain-community>=0.2.0
+langchain-core>=0.2.0
+langchain-google-genai>=1.0.3
+google-generativeai>=0.5.0
 pdfplumber
 python-docx
 pdf2image
 pytesseract
 Pillow
-
-# Utilities
 python-dotenv
 tqdm
 sentence-transformers
