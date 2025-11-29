@@ -1,2 +1,4 @@
 env/
 .env/
+.gemini_env/
+gemini_env/

@@ -1,0 +1,58 @@
+Python Bytecode and Cache
+
+pycache
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info
+*.egg
+
+Virtual Environments (CRITICAL: Do not copy local envs to container)
+
+env/
+venv/
+.venv/
+.gemini_env/
+gemini_env/
+
+Environment Variables & Secrets (Safety precaution)
+
+.env
+.env.local
+
+Git
+
+.git
+.gitignore
+
+Docker configuration (don't copy the build instructions into the build)
+
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+IDE and Editor settings
+
+.vscode
+.idea
+*.swp
+*.swo
+
+OS specific files
+
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+Optional: Large data folders or vector stores
+
+If you are using ChromaDB/SQLite locally, you usually don't
+
+want to copy the actual DB files into the image layer;
+
+you should mount them as volumes instead.
+
+chroma_db/
+
+data/

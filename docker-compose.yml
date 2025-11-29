@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  knowledge-agent:
+    build: .
+    container_name: knowledge_agent
+    ports:
+      - "8501:8501"
+    volumes:
+      # Persist the vector database index on your host machine
+      - ./chroma_db:/app/chroma_db
+      # Optional: Mount uploads folder to inspect files easily
+      - ./uploads:/app/uploads
+    environment:
+      # Pass your API key into the container
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+    # Load environment variables from a .env file
+    env_file:
+      - .env
+    restart: unless-stopped

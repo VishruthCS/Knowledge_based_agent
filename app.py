@@ -197,7 +197,7 @@ with colq1:
                 ans = out.get("answer", "")
                 sources = out.get("sources", [])
                 st.session_state.chat_history.insert(0, (question, ans, sources))
-                st.experimental_rerun()
+                st.rerun()
 
 with colq2:
     if st.button("Clear chat history"):

@@ -1,22 +1,21 @@
-# protobuf < 5 to keep Google GenAI & opentelemetry happy
-protobuf==4.25.8
-
-# Google GenAI client: choose a version compatible with langchain-google-genai 2.x
-google-generativeai==0.8.5
-
-# LangChain core pieces (0.3.x family)
-langchain-core==0.3.80
-langchain-google-genai==2.0.10
-langchain-text-splitters==0.3.11
-langchain-community==0.4.1
-
-# Vector DB and parsing / OCR
+streamlit
+# ChromaDB 0.3.29 is required because your code uses .persist()
 chromadb==0.3.29
-pdfplumber==0.11.8
-python-docx==0.8.11
-pdf2image==1.17.0
-pytesseract==0.3.13
-Pillow==9.5.0
 
-# small utilities
-tqdm==4.67.1
+# LangChain and GenAI (Unpinned to allow pip to resolve versions automatically)
+langchain
+langchain-community
+langchain-google-genai
+google-generativeai
+
+# Document Processing
+pdfplumber
+python-docx
+pdf2image
+pytesseract
+Pillow
+
+# Utilities
+python-dotenv
+tqdm
+sentence-transformers
