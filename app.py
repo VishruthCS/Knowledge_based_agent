@@ -1,121 +1,146 @@
 import os
+import shutil
+import tempfile
 import streamlit as st
-from backend import process_and_index, query_stream
+import graphviz
+from backend import process_and_index, rewrite_query, retrieve_documents, stream_answer, generate_knowledge_graph
+
+st.set_page_config(page_title="AI Agent V2.1", layout="wide", page_icon="🕸️")
+
+# --- SESSION STATE SETUP ---
+# Create a temporary directory unique to this specific browser session
+if "temp_persist_dir" not in st.session_state:
+    # This creates a fresh folder like /tmp/tmp123abc...
+    st.session_state.temp_persist_dir = tempfile.mkdtemp()
+    
+if "messages" not in st.session_state: 
+    st.session_state.messages = []
+if "processed_files" not in st.session_state: 
+    st.session_state.processed_files = []
 
 # Constants
 UPLOAD_DIR = "uploads"
-PERSIST_DIR = "chroma_db"
+# CRITICAL FIX: Use the session-specific temp folder instead of the shared "chroma_db"
+PERSIST_DIR = st.session_state.temp_persist_dir
+
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# Page Config
-st.set_page_config(page_title="AI Knowledge Agent", layout="wide")
-
-# ==========================================
-# SESSION STATE INITIALIZATION
-# ==========================================
-if "messages" not in st.session_state:
-    st.session_state.messages = []  # Store chat history
-if "processed_files" not in st.session_state:
-    st.session_state.processed_files = []
-
-# ==========================================
-# SIDEBAR: CONFIGURATION
-# ==========================================
+# Sidebar
 with st.sidebar:
-    st.header("🧠 Agent Brain")
+    st.title("🤖 Agent V2.1")
     
-    # Model Selector
-    # Updated based on your 'debug.py' output
     model_choice = st.selectbox(
-        "Choose Model",
+        "AI Model", 
         ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"],
-        index=0,
-        help="Select a model available to your API key."
+        index=0
+    )
+    
+    enable_rewrite = st.toggle(
+        "Query Rewriting", 
+        value=True, 
+        help="Automatically rewrites vague questions for better search results."
+    )
+    
+    complexity = st.select_slider(
+        "Answer Complexity", 
+        options=["Novice", "Standard", "Expert"], 
+        value="Standard"
     )
     
     st.divider()
     
-    st.header("📂 Knowledge Base")
-    uploaded_files = st.file_uploader(
-        "Upload Documents (PDF, Docx, Txt)", 
-        accept_multiple_files=True
-    )
-    
-    if st.button("⚡ Process & Index Documents"):
-        if not uploaded_files:
-            st.warning("Please upload files first.")
-        else:
-            with st.spinner("Processing files in parallel..."):
-                # Save files to disk
-                saved_paths = []
+    uploaded_files = st.file_uploader("Upload Docs (Current Session Only)", accept_multiple_files=True)
+    if st.button("⚡ Process & Index"):
+        if uploaded_files:
+            with st.spinner("Processing..."):
+                saved = []
                 for f in uploaded_files:
-                    path = os.path.join(UPLOAD_DIR, f.name)
-                    with open(path, "wb") as out:
-                        out.write(f.getbuffer())
-                    saved_paths.append(path)
+                    p = os.path.join(UPLOAD_DIR, f.name)
+                    # Write the file to the uploads directory
+                    with open(p, "wb") as o: 
+                        o.write(f.getbuffer())
+                    saved.append(p)
                 
-                # Call Backend
-                result = process_and_index(saved_paths, PERSIST_DIR)
-                
-                if result["success"]:
-                    st.success(result["message"])
-                    st.session_state.processed_files = saved_paths
-                    st.session_state.messages = [] # Clear chat on new index
-                else:
-                    st.error(result["message"])
+                # Process files into the Session-Specific DB
+                res = process_and_index(saved, PERSIST_DIR)
+                if res["success"]:
+                    st.success(res["message"])
+                    st.session_state.processed_files = saved
+                    st.session_state.messages = []
+                else: 
+                    st.error(res["message"])
+        else:
+            st.warning("Upload files first!")
 
-    if st.session_state.processed_files:
-        st.write(f"📚 Indexed {len(st.session_state.processed_files)} files")
-    
-    st.divider()
     if st.button("Clear Conversation"):
         st.session_state.messages = []
         st.rerun()
 
-# ==========================================
-# MAIN CHAT INTERFACE
-# ==========================================
-st.title("🤖 Intelligent Knowledge Agent")
-st.caption("Powered by Gemini • Vector Search • RAG")
+# Main Chat Interface
+st.title("🕸️ AI Knowledge Agent + Graph")
+st.caption(f"Features: Reasoning • Rewriting • Knowledge Graph • Complexity: **{complexity}**")
+st.info(f"🧠 Memory ID: `{os.path.basename(PERSIST_DIR)}` (Files uploaded here will vanish when you close the tab)")
 
-# 1. Display Chat History
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+# Display History
+for m in st.session_state.messages:
+    with st.chat_message(m["role"]): 
+        st.markdown(m["content"])
 
-# 2. Handle User Input
-if prompt := st.chat_input("Ask a question about your documents..."):
-    # Add user message to state
+# User Input
+if prompt := st.chat_input("Ask a question..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
-    
-    # Display user message immediately
-    with st.chat_message("user"):
+    with st.chat_message("user"): 
         st.markdown(prompt)
 
-    # Generate Response
     with st.chat_message("assistant"):
-        message_placeholder = st.empty()
-        full_response = ""
+        msg_box = st.empty()
         
-        # Stream the response
-        history_for_backend = [(m["role"], m["content"]) for m in st.session_state.messages]
+        # 1. Feature 2: Query Rewriting
+        query = prompt
+        if enable_rewrite:
+            with st.status("Thinking...", expanded=False) as status:
+                status.write("Analyzing context...")
+                hist = [(m["role"], m["content"]) for m in st.session_state.messages]
+                query = rewrite_query(prompt, hist, model_choice)
+                status.write(f"Optimized Query: {query}")
+                status.update(label="Query Optimized", state="complete")
+        
+        # 2. Feature 1: Retrieval & Evidence
+        # Retrieve ONLY from the session-specific folder
+        docs = retrieve_documents(query, PERSIST_DIR)
+        
+        if docs:
+            # TABS: Switch between Text Evidence and Visual Graph
+            tab1, tab2 = st.tabs(["📄 Reasoning Trace", "🕸️ Knowledge Graph"])
+            
+            with tab1:
+                st.caption("The agent used these document snippets to answer:")
+                for i, d in enumerate(docs):
+                    st.markdown(f"**Chunk {i+1}** | Source: *{d.metadata.get('source')}* (Pg {d.metadata.get('page')})")
+                    st.caption(d.page_content[:300].replace("\n", " ") + "...")
+                    st.divider()
+            
+            with tab2:
+                # Feature 4: Knowledge Graph Generation
+                with st.spinner("Generating graph from context..."):
+                    dot_code = generate_knowledge_graph(docs, model_choice)
+                    try:
+                        st.graphviz_chart(dot_code)
+                    except Exception as e:
+                        st.error(f"Could not render graph: {e}")
+
+        # 3. Generation (Streaming)
+        full_res = ""
+        hist_tuples = [(m["role"], m["content"]) for m in st.session_state.messages]
         
         try:
-            stream_gen = query_stream(
-                prompt, 
-                history_for_backend, 
-                PERSIST_DIR, 
-                model_name=model_choice
-            )
+            for chunk in stream_answer(prompt, docs, hist_tuples, model_choice, complexity):
+                full_res += chunk
+                msg_box.markdown(full_res + "▌")
             
-            for chunk in stream_gen:
-                full_response += chunk
-                message_placeholder.markdown(full_response + "▌")
-            
-            message_placeholder.markdown(full_response)
+            msg_box.markdown(full_res)
         except Exception as e:
             st.error(f"An error occurred: {e}")
-            full_response = "I encountered an error processing your request."
-
-    # Add assistant response to state
-    st.session_state.messages.append({"role": "assistant", "content": full_response})
+            full_res = "I encountered an error generating the response."
+    
+    st.session_state.messages.append({"role": "assistant", "content": full_res})

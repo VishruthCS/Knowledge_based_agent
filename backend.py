@@ -1,17 +1,12 @@
 import os
-import traceback
 import concurrent.futures
-from typing import List, Dict, Any, Generator
+from typing import List, Dict, Generator
 
 # File Processing
-from PIL import Image
-import pytesseract
-
 try:
     import pdfplumber
 except ImportError:
     pdfplumber = None
-
 try:
     import docx
 except ImportError:
@@ -30,7 +25,7 @@ except ImportError:
     SentenceTransformer = None
 
 # ==========================================
-# 1. TEXT EXTRACTION (Parallelizable)
+# 1. TEXT EXTRACTION
 # ==========================================
 
 def extract_text_single_file(file_path: str) -> List[Dict]:
@@ -66,7 +61,6 @@ def extract_text_single_file(file_path: str) -> List[Dict]:
 # ==========================================
 
 class LocalSentenceEmbedding:
-    """Fallback if Gemini API is down or Key is missing."""
     def __init__(self, model="all-MiniLM-L6-v2"):
         if SentenceTransformer is None:
             raise ImportError("sentence-transformers not installed.")
@@ -79,33 +73,63 @@ class LocalSentenceEmbedding:
         return self.m.encode([text], convert_to_numpy=True)[0].tolist()
 
 def get_embeddings_function():
-    """Returns the embedding function (Gemini or Local)."""
     api_key = os.environ.get("GOOGLE_API_KEY")
     if api_key:
         try:
-            # Check debug output: 'models/embedding-001' IS available in your list
             return GoogleGenerativeAIEmbeddings(
                 model="models/embedding-001",
                 google_api_key=api_key
             )
         except Exception:
             pass
-    
-    print("⚠️ Using Local Embeddings (Fallback)")
     return LocalSentenceEmbedding()
 
+def get_llm(model_name="gemini-2.5-flash"):
+    """
+    Creates LLM with specific fallback logic for Gemini 2.x models.
+    """
+    api_key = os.environ.get("GOOGLE_API_KEY")
+    
+    # Try the requested model first
+    try:
+        return ChatGoogleGenerativeAI(
+            model=model_name,
+            google_api_key=api_key,
+            temperature=0.3,
+            convert_system_message_to_human=True
+        )
+    except Exception:
+        pass
+    
+    # Fallback 1: Gemini 2.0 Flash
+    try:
+        print(f"Warning: Could not load {model_name}, trying gemini-2.0-flash")
+        return ChatGoogleGenerativeAI(
+            model="gemini-2.0-flash",
+            google_api_key=api_key,
+            temperature=0.3,
+            convert_system_message_to_human=True
+        )
+    except Exception:
+        pass
+
+    # Fallback 2: Generic latest alias
+    print("Warning: Specific models failed, trying gemini-flash-latest")
+    return ChatGoogleGenerativeAI(
+        model="gemini-flash-latest",
+        google_api_key=api_key,
+        temperature=0.3,
+        convert_system_message_to_human=True
+    )
+
 # ==========================================
-# 3. CORE LOGIC (Ingest & Query)
+# 3. INGESTION LOGIC
 # ==========================================
 
 def process_and_index(file_paths: List[str], persist_directory="chroma_db"):
-    """
-    Reads files in PARALLEL to speed up ingestion.
-    """
     text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     all_docs = []
 
-    # Parallel processing using ThreadPool
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
         future_to_file = {executor.submit(extract_text_single_file, fp): fp for fp in file_paths}
         
@@ -120,9 +144,7 @@ def process_and_index(file_paths: List[str], persist_directory="chroma_db"):
                             page_content=chunk,
                             metadata={
                                 "source": os.path.basename(fp),
-                                "file_path": fp,
                                 "page": p['page'],
-                                "chunk_id": i
                             }
                         ))
             except Exception as e:
@@ -131,10 +153,8 @@ def process_and_index(file_paths: List[str], persist_directory="chroma_db"):
     if not all_docs:
         return {"success": False, "message": "No text extracted from files."}
 
-    # Indexing
     emb_fn = get_embeddings_function()
     try:
-        # Batch add documents to Chroma
         vectordb = Chroma.from_documents(
             documents=all_docs,
             embedding=emb_fn,
@@ -145,107 +165,127 @@ def process_and_index(file_paths: List[str], persist_directory="chroma_db"):
     except Exception as e:
         return {"success": False, "message": str(e)}
 
-def get_llm(model_name="gemini-2.5-flash"):
-    """
-    Creates LLM with fallback logic specific to your available models.
-    """
-    api_key = os.environ.get("GOOGLE_API_KEY")
-    
-    # Try the requested model first
-    try:
-        llm = ChatGoogleGenerativeAI(
-            model=model_name,
-            google_api_key=api_key,
-            temperature=0.3,
-            convert_system_message_to_human=True
-        )
-        return llm
-    except Exception:
-        pass
-        
-    # If instantiation fails immediately, return a safer default from your list
-    print(f"Warning: Could not load {model_name}, falling back to gemini-2.0-flash")
-    return ChatGoogleGenerativeAI(
-        model="gemini-2.0-flash",
-        google_api_key=api_key,
-        temperature=0.3,
-        convert_system_message_to_human=True
-    )
+# ==========================================
+# 4. INTELLIGENT AGENT LOGIC
+# ==========================================
 
-def query_stream(question: str, chat_history: List, persist_directory="chroma_db", model_name="gemini-2.5-flash") -> Generator:
+def rewrite_query(original_query: str, chat_history: List, model_name: str) -> str:
     """
-    Yields chunks of text for the streaming effect.
+    Feature 2: Uses a cheap LLM call to rewrite vague queries into specific ones.
+    """
+    llm = get_llm(model_name)
+    
+    history_context = ""
+    if chat_history:
+        # Take last 2 exchanges to keep context relevant but concise
+        last_exchange = chat_history[-2:] 
+        for role, text in last_exchange:
+            history_context += f"{role}: {text}\n"
+
+    prompt = (
+        "You are an AI query refiner. Rewrite the user's query to be optimal for vector retrieval.\n"
+        "1. Remove conversational filler.\n"
+        "2. Add specific keywords from context if the query is vague (e.g., 'what about cost?').\n"
+        "3. Output ONLY the rewritten query text.\n\n"
+        f"Chat Context:\n{history_context}\n"
+        f"Original Query: {original_query}\n"
+        "Refined Query:"
+    )
+    
+    try:
+        response = llm.invoke(prompt)
+        return response.content.strip()
+    except Exception:
+        return original_query 
+
+def retrieve_documents(query: str, persist_directory="chroma_db") -> List[Document]:
+    """
+    Feature 1 (Part A): Retrieves raw documents for the reasoning trace.
     """
     emb_fn = get_embeddings_function()
-    
-    # Load Vector DB
     try:
         vectordb = Chroma(persist_directory=persist_directory, embedding_function=emb_fn)
-        retriever = vectordb.as_retriever(search_kwargs={"k": 4})
+        retriever = vectordb.as_retriever(search_kwargs={"k": 5})
+        try:
+            return retriever.invoke(query)
+        except AttributeError:
+            return retriever.get_relevant_documents(query)
     except Exception as e:
-        yield f"Error loading index: {e}"
-        return
+        print(f"Retrieval Error: {e}")
+        return []
 
-    # 1. Retrieve Context
-    try:
-        docs = retriever.invoke(question)
-    except Exception:
-        docs = retriever.get_relevant_documents(question)
-
-    context_text = "\n\n".join([f"Source: {d.metadata.get('source', 'Unknown')}\n{d.page_content}" for d in docs])
+def stream_answer(
+    question: str, 
+    context_docs: List[Document], 
+    chat_history: List, 
+    model_name: str,
+    complexity_level: str = "Standard"
+) -> Generator:
+    """
+    Feature 6: Generates answer with specific complexity level.
+    """
+    context_text = "\n\n".join([
+        f"Source: {d.metadata.get('source', 'Unknown')} (Pg {d.metadata.get('page', '?')})\nContent: {d.page_content}" 
+        for d in context_docs
+    ])
     
     if not context_text:
         yield "I couldn't find any relevant information in the uploaded documents."
         return
 
-    # 2. Format Chat History
-    history_text = ""
-    for role, text in chat_history[-4:]: 
-        history_text += f"{role}: {text}\n"
+    history_text = "\n".join([f"{role}: {text}" for role, text in chat_history[-4:]])
+    
+    audience_instruction = "Provide a standard, balanced explanation."
+    if complexity_level == "Novice":
+        audience_instruction = "Explain this like I am 5 years old. Use simple analogies and avoid jargon."
+    elif complexity_level == "Expert":
+        audience_instruction = "Provide a highly technical, detailed analysis. Assume the user is a subject matter expert."
 
-    # 3. Construct Prompt
     system_prompt = (
-        "You are a helpful Knowledge Base Assistant. "
-        "Use the following Context to answer the user's question. "
-        "If the answer is not in the context, say you don't know.\n\n"
+        "You are a Knowledge Base Agent. Use the Context below to answer the user's question.\n"
+        f"Constraint: {audience_instruction}\n"
+        "If the answer isn't in the context, admit it.\n\n"
         f"CONTEXT:\n{context_text}\n\n"
         f"CHAT HISTORY:\n{history_text}\n\n"
         f"USER QUESTION: {question}\n\n"
         "ANSWER:"
     )
 
-    # 4. Stream Response with Fallback
+    llm = get_llm(model_name)
+    try:
+        for chunk in llm.stream(system_prompt):
+            if chunk.content:
+                yield chunk.content
+    except Exception as e:
+        yield f"Error generating response: {e}"
+
+# ==========================================
+# 5. KNOWLEDGE GRAPH GENERATOR (NEW)
+# ==========================================
+def generate_knowledge_graph(context_docs: List[Document], model_name: str) -> str:
+    """
+    Feature 4: Extracts entities and relationships for Graphviz.
+    Returns: String in DOT format.
+    """
+    # Use a limited sample of text to avoid token limits and keep the graph focused
+    text_sample = "\n".join([d.page_content[:500] for d in context_docs[:3]]) 
     llm = get_llm(model_name)
     
+    prompt = (
+        "You are a Knowledge Graph extraction engine. Analyze the text below and extract core entities and relationships.\n"
+        "Output strictly in DOT format for Graphviz. Do not include ```graphviz``` or ```dot``` markers. Just the code.\n"
+        "Format: digraph G { rankdir=LR; NodeA -> NodeB [label=\"relationship\"]; ... }\n"
+        "Keep node names short (max 3 words). Limit to the top 10 most important relationships.\n\n"
+        f"Text to Analyze:\n{text_sample}"
+    )
+    
     try:
-        try:
-            for chunk in llm.stream(system_prompt):
-                if chunk.content:
-                    yield chunk.content
-        except Exception as e:
-            # Check for 404 (Model Not Found)
-            err_msg = str(e)
-            if "404" in err_msg or "NotFound" in err_msg:
-                # Fallback Level 1: gemini-2.0-flash (Available in your list)
-                yield f"⚠️ Model '{model_name}' not found. Trying 'gemini-2.0-flash'...\n\n"
-                
-                try:
-                    fallback_llm = get_llm("gemini-2.0-flash")
-                    for chunk in fallback_llm.stream(system_prompt):
-                        if chunk.content:
-                            yield chunk.content
-                except Exception as e2:
-                    if "404" in str(e2):
-                         # Fallback Level 2: gemini-flash-latest (Generic alias)
-                        yield "⚠️ 'gemini-2.0-flash' also failed. Trying 'gemini-flash-latest'...\n\n"
-                        fallback_llm_2 = get_llm("gemini-flash-latest")
-                        for chunk in fallback_llm_2.stream(system_prompt):
-                            if chunk.content:
-                                yield chunk.content
-                    else:
-                        raise e2
-            else:
-                raise e
-                
-    except Exception as final_error:
-        yield f"❌ All models failed. Error: {final_error}\nPlease check your API Key and Google Cloud Project settings."
+        response = llm.invoke(prompt)
+        # Clean up code blocks if the LLM includes them
+        dot_code = response.content.replace("```dot", "").replace("```graphviz", "").replace("```", "").strip()
+        
+        if "digraph" not in dot_code:
+            return 'digraph G { "No Graph" -> "Generated"; }'
+        return dot_code
+    except Exception as e:
+        return f'digraph G {{ "Error" -> "{str(e)}"; }}'

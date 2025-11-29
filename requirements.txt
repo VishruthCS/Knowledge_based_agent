@@ -13,3 +13,4 @@ Pillow
 python-dotenv
 tqdm
 sentence-transformers
+graphviz
