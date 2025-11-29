@@ -142,12 +142,4 @@ streamlit run app.py
 
 ---
 
-## 🤝 Contributing
 
-Fork the repo, create a branch, submit PRs.  
-
----
-
-## 📜 License
-
-MIT License
