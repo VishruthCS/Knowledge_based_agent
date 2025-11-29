@@ -1,43 +1,153 @@
-# Knowledge Base Agent — RAG Demo
+# 🕸️ AI Knowledge Base Agent (V2.1)
 
-## Overview
-This is a minimal, judge-ready Knowledge Base Agent that allows uploading documents (PDF/DOCX/TXT),
-indexes them using OpenAI embeddings into Chroma, and answers questions via a Retrieval-Augmented-Generation (RAG) pipeline.
+### 🌐 **Live Demo:**  
+🚀 **https://knowledgebasedagent-hmsavacrqcpalcfygerxnv.streamlit.app/**  
 
-## How to run (local)
-1. Create virtual env & install:
-   python -m venv venv
-   source venv/bin/activate  # windows: venv\\Scripts\\activate
-   pip install -r requirements.txt
+A powerful **Retrieval-Augmented Generation (RAG)** application built with Python, Streamlit, and Google Gemini. This agent allows users to upload documents (PDF, DOCX, TXT), creates a temporary knowledge base, and answers questions with citation-backed evidence and knowledge graph visualizations.
 
-2. Set environment variable:
-   export OPENAI_API_KEY="sk-xxxx"
-   (Or set in Streamlit secrets)
+---
 
-3. Run the app:
-   streamlit run app.py
+## 🚀 Key Features
 
-4. Workflow:
-   - Upload a few sample PDFs/DOCX/TXT.
-   - Click "Index / Re-Index uploaded files".
-   - Ask questions in the query box and view answers + sources.
+* **⚡ Session-Specific Memory:** Creates a unique, temporary vector store for every browser session. Data is isolated and automatically cleared when the session ends.
+* **🧠 Multi-Model Support:** Choose between `gemini-2.5-flash`, `gemini-2.5-pro`, and `gemini-2.0-flash` for different reasoning capabilities.
+* **📄 Reasoning Trace:** Provides exact source citations (filename, page number, and snippets) for every answer to ensure accuracy.
+* **🕸️ Knowledge Graph Generation:** Automatically extracts entities and relationships from the retrieved context and visualizes them using Graphviz.
+* **✍️ Intelligent Query Rewriting:** Uses an intermediate LLM step to refine vague user queries into search-optimized keywords.
+* **🎚️ Adaptive Complexity:** Adjust answers based on the target audience (Novice, Standard, Expert).
+* **📁 Robust File Parsing:** Supports OCR (Tesseract) for scanned PDFs, `pdfplumber` for text PDFs, and `python-docx` for Word documents.
 
-## Deliverables (for submission)
-- Demo link: (hosted Streamlit app or local run instructions)
-- Git repo: include app.py, ingest.py, requirements.txt, README, architecture diagram.
-- Architecture diagram: show flow: Streamlit -> Ingest -> Embeddings -> Chroma -> LLM -> UI
-- Short demo script (2 minutes) included below.
+---
 
-## Demo script (2-min):
-1. Show app UI and uploaded files area (10s)
-2. Upload 2-3 sample policy PDFs (10s)
-3. Click "Index" — show progress (10s)
-4. Ask 2 quick questions (30s): one factual question that’s directly supported; one requiring cross-file context.
-5. Show sources with page and chunk snippet (20s)
-6. Explain design choices: RAG, metadata, cost optimisation, re-index, compliance (40s)
+## 🛠️ Tech Stack
 
-## Notes & Extensions
-- Add OCR (Tesseract) for scanned PDFs.
-- Add authentication and per-user persistent storage for privacy.
-- Add confidence scoring and an option to return exact quoted text segments.
+* **Frontend:** Streamlit  
+* **LLM Provider:** Google Gemini API  
+* **Orchestration:** LangChain  
+* **Vector Database:** ChromaDB  
+* **Embeddings:** Google `embedding-001`  
+* **Visualization:** Graphviz  
+* **OCR/Parsing:** pdf2image, pytesseract, pdfplumber  
 
+---
+
+## ⚙️ Installation & Setup
+
+### Prerequisites
+* Python 3.11
+* Docker Desktop  
+* A Google AI Studio API Key  
+
+---
+
+## ▶️ Option 1: Run with Docker (Recommended)
+
+```bash
+git clone https://github.com/VishruthCS/Knowledge_based_agent.git
+cd Knowledge_based_agent
+```
+
+Create `.env` file:
+
+```
+GOOGLE_API_KEY="your_actual_api_key_here"
+```
+
+Run container:
+
+```bash
+docker-compose up --build
+```
+
+Open app:  
+👉 `http://localhost:8501`
+
+---
+
+## ▶️ Option 2: Local Installation (Manual)
+
+### **1. Install System Dependencies**
+
+**Windows:**  
+- Install Tesseract OCR  
+- Install Poppler  
+- Add both to PATH  
+
+**Linux (Ubuntu/Debian):**
+
+```bash
+sudo apt-get update && sudo apt-get install -y build-essential poppler-utils tesseract-ocr
+```
+
+**Mac (Homebrew):**
+
+```bash
+brew install tesseract poppler
+```
+
+---
+
+### **2. Install Python Dependencies**
+
+```bash
+python -m venv venv
+source venv/bin/activate   # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+### **3. Run the Application**
+
+```bash
+streamlit run app.py
+```
+
+---
+
+## 📂 Project Structure
+
+```
+├── app.py
+├── backend.py
+├── ingest.py
+├── model.py
+├── requirements.txt
+├── Dockerfile
+├── docker-compose.yml
+├── .env
+└── uploads/
+```
+
+---
+
+## 🖥️ Usage Guide
+
+1. Upload PDF, DOCX, TXT  
+2. Click **Process & Index**  
+3. Ask questions  
+4. View **Reasoning Trace** and **Knowledge Graph**  
+5. Adjust settings (complexity, model, rewriting)
+
+---
+
+## 🛡️ Troubleshooting
+
+**“Microsoft Visual C++ 14.0 required”**  
+→ Use Docker OR install Build Tools  
+
+**“Tesseract not installed”**  
+→ Install and add to PATH  
+
+**“Gemini model not found”**  
+→ Check API key access in Google AI Studio  
+
+---
+
+## 🤝 Contributing
+
+Fork the repo, create a branch, submit PRs.  
+
+---
+
+## 📜 License
+
+MIT License
